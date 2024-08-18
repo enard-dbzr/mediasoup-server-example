@@ -13,10 +13,15 @@
   "license": "ISC",
   "dependencies": {
     "@types/express": "^4.17.20",
+    "child_process": "^1.0.2",
     "cors": "^2.8.5",
+    "events": "^3.3.0",
     "express": "^4.18.2",
+    "fs": "^0.0.1-security",
     "mediasoup": "^3.12.16",
+    "sharp": "^0.33.5",
     "socket.io": "^4.7.2",
+    "stream": "^0.0.3",
     "typescript": "^5.2.2"
   },
   "devDependencies": {

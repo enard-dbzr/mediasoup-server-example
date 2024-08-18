@@ -57,7 +57,7 @@ export default function Home() {
    * On successful connection, the camera is started to obtain a media stream.
    */
   useEffect(() => {
-    const socket = io("http://localhost:4000/mediasoup");
+    const socket = io("http://localhost:4000/");
 
     setSocket(socket);
     socket.on("connection-success", (data) => {
@@ -115,7 +115,7 @@ export default function Home() {
 
       await newDevice.load({ routerRtpCapabilities: rtpCapabilities });
 
-      setDevice(newDevice);
+      setDevice(newDevice);mediasoup
     } catch (error: any) {
       console.log(error);
       if (error.name === "UnsupportedError") {

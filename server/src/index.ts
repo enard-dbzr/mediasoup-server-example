@@ -12,6 +12,8 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import mediasoup from "mediasoup";
+import { Ffmpeg } from "./ffmpeg.js";
+import { getPort } from "./port.js";
 
 const app = express();
 const port = 4000;
@@ -38,7 +40,7 @@ const io = new Server(server, {
  * Namespace under which all mediasoup related socket events and data will be handled.
  * This helps in organizing socket events, making the codebase scalable and manageable.
  */
-const peers = io.of("/mediasoup");
+const peers = io.of("/");
 
 /**
  * A mediasoup worker; it handles the media layer by managing Router instances.
@@ -79,6 +81,8 @@ let producer: mediasoup.types.Producer<mediasoup.types.AppData> | undefined;
  * It's critical for managing the reception of media data from producers.
  */
 let consumer: mediasoup.types.Consumer<mediasoup.types.AppData> | undefined;
+
+let ffmpeg: Ffmpeg | undefined;
 
 /**
  * Asynchronously creates and initializes a mediasoup Worker.
@@ -207,6 +211,7 @@ peers.on("connection", async (socket) => {
    */
   socket.on("getRouterRtpCapabilities", (callback) => {
     const routerRtpCapabilities = router.rtpCapabilities;
+    console.log("Sent router rtp capabilities");
     callback({ routerRtpCapabilities });
   });
 
@@ -253,6 +258,94 @@ peers.on("connection", async (socket) => {
     });
 
     callback({ id: producer?.id });
+  });
+
+  const publishProducerRtpStream = async () => {
+    console.log('publishProducerRtpStream()');
+
+    // Create the mediasoup RTP Transport used to send media to the GStreamer process
+    const rtpTransportConfig = {
+      listenIp: { ip: '0.0.0.0', announcedIp: 'localhost' },
+      rtcpMux: true,
+      comedia: false
+    };
+
+    const rtpTransport = await router.createPlainTransport(rtpTransportConfig);
+
+    // Set the receiver RTP ports
+    const remoteRtpPort = await getPort();
+
+    let remoteRtcpPort;
+    if (!rtpTransportConfig.rtcpMux) {
+      remoteRtcpPort = await getPort();
+    }
+
+
+    // Connect the mediasoup RTP transport to the ports used by GStreamer
+    await rtpTransport.connect({
+      ip: '127.0.0.1',
+      port: remoteRtpPort,
+      rtcpPort: remoteRtcpPort
+    });
+
+    const codecs = [];
+    // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
+    const routerCodec = router.rtpCapabilities.codecs?.find(
+      codec => codec.kind === producer!.kind
+    )!;
+
+    // if (routerCodec === undefined) {
+    //   throw new TypeError('No compatible codec!');
+    // }
+
+    codecs.push(routerCodec);
+
+    const rtpCapabilities = {
+      codecs,
+      rtcpFeedback: []
+    };
+
+    // Start the consumer paused
+    // Once the gstreamer process is ready to consume resume and send a keyframe
+    const rtpConsumer = await rtpTransport.consume({
+      producerId: producer!.id,
+      rtpCapabilities,
+      paused: true
+    });
+
+    consumer = rtpConsumer;
+
+    return {
+      remoteRtpPort,
+      remoteRtcpPort,
+      localRtcpPort: rtpTransport.rtcpTuple ? rtpTransport.rtcpTuple.localPort : undefined,
+      rtpCapabilities,
+      rtpParameters: rtpConsumer.rtpParameters
+    };
+  };
+
+  socket.on("start-record", async () => {
+    let recordInfo = {
+      video: await publishProducerRtpStream(),
+      fileName: Date.now().toString()
+    };
+
+    ffmpeg = new Ffmpeg(recordInfo, "2.7");
+
+    await ffmpeg.start();
+
+    setTimeout(async () => {
+      await consumer?.resume();
+      await consumer?.requestKeyFrame();
+    }, 100);
+  });
+
+  socket.on("stop-record", async (params, callback) => {
+    consumer?.close();
+    ffmpeg?.kill();
+    console.log("STOOOOP");
+    const result = await ffmpeg?.getResult();
+    console.log("result", result);
   });
 
   /**
