@@ -340,12 +340,13 @@ peers.on("connection", async (socket) => {
     }, 100);
   });
 
-  socket.on("stop-record", async (params, callback) => {
+  socket.on("stop-record", async (callback) => {
     consumer?.close();
     ffmpeg?.kill();
-    console.log("STOOOOP");
+    console.log("stopping");
     const result = await ffmpeg?.getResult();
     console.log("result", result);
+    callback(result);
   });
 
   /**

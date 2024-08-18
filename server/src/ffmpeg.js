@@ -17,8 +17,10 @@ class FrameProcessor extends Transform {
 
         this.frame_size = width * height * 3
 
-        this.first_frame = undefined;
-        this.last_frame = undefined;
+        this.firstFrame = undefined;
+        this.lastFrame = undefined;
+
+        this.framesCount = 0
 
         this.buffer = Buffer.alloc(0);
     }
@@ -29,33 +31,36 @@ class FrameProcessor extends Transform {
         this.buffer = Buffer.concat([this.buffer, chunk]);
 
         while (this.buffer.length >= this.frame_size) {
-            console.log("parsed frame");
+            this.framesCount++;
+            console.log("parsed frame", this.framesCount);
             const frame = this.buffer.subarray(0, this.frame_size);
             this.buffer = this.buffer.subarray(this.frame_size);
 
-            if (this.first_frame === undefined) {
-                this.first_frame = frame;
-                console.log(this.first_frame.length, this.frame_size);
+            if (this.firstFrame === undefined) {
+                this.firstFrame = frame;
+                console.log(this.firstFrame.length, this.frame_size);
             }
 
-            this.last_frame = frame;
+            this.lastFrame = frame;
         }
 
         callback();
     }
 
     async getResult() {
-        const first_image = await sharp(this.first_frame,
+        const firstImage = await sharp(this.firstFrame,
             {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
             .jpeg()
             .toBuffer();
 
-        const last_image = await sharp(this.last_frame,
+        const lastImage = await sharp(this.lastFrame,
             {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
             .jpeg()
             .toBuffer();
 
-        return {first_image, last_image}
+        const framesCount = this.framesCount;
+
+        return {firstImage, lastImage, framesCount}
     }
 }
 
@@ -148,8 +153,7 @@ export class Ffmpeg {
             '-pix_fmt', 'rgb24',
             'pipe:1',
             '-an',
-            '-sn',
-            '-rtpflags', `localport=${uniquePort}`
+            '-sn'
         ];
     }
 }

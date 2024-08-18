@@ -44,7 +44,12 @@ class User:
 
         await self.track_ended_event.wait()
 
-        await self.stop_record()
+        result = await self.stop_record()
+
+        with open("first_image.jpg", "wb") as f:
+            f.write(result["firstImage"])
+        with open("last_image.jpg", "wb") as f:
+            f.write(result["lastImage"])
 
         await asyncio.sleep(2)
 
@@ -105,7 +110,7 @@ class User:
 
     async def stop_record(self):
         print("stop record")
-        await self.sio.emit("stop-record")
+        return await self.sio.call("stop-record")
 
 
 if __name__ == '__main__':
