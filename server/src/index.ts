@@ -42,6 +42,8 @@ const io = new Server(server, {
  */
 const peers = io.of("/");
 
+
+
 /**
  * A mediasoup worker; it handles the media layer by managing Router instances.
  * @description It's crucial for the operation of the mediasoup server.

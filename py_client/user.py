@@ -1,3 +1,4 @@
+
 import asyncio
 from asyncio import Event
 from typing import Optional
@@ -113,7 +114,13 @@ class User:
         return await self.sio.call("stop-record")
 
 
-if __name__ == '__main__':
+async def task():
     user = User()
+    await user.async_task()
 
-    asyncio.run(user.async_task())
+
+async def main():
+    await asyncio.gather(task(), task())
+
+if __name__ == '__main__':
+    asyncio.run(main())
