@@ -15,7 +15,7 @@ import mediasoup from "mediasoup";
 import {Ffmpeg} from "./ffmpeg.js";
 import {getPort} from "./port.js";
 import {v4 as uuid4} from "uuid";
-import {Peer} from "./peer.js";
+import {Connection} from "./connection.js";
 
 
 const app = express();
@@ -45,7 +45,6 @@ const io = new Server(server, {
  * This helps in organizing socket events, making the codebase scalable and manageable.
  */
 const peers = io.of("/");
-
 
 
 /**
@@ -94,57 +93,38 @@ worker = await createWorker();
  */
 const mediaCodecs: mediasoup.types.RtpCodecCapability[] = [
     {
-        /** Indicates this is an audio codec configuration */
-        kind: "audio",
-        /**
-         * Specifies the MIME type for the Opus codec, known for good audio quality at various bit rates.
-         * Format: <type>/<subtype>, e.g., audio/opus
-         */
-        mimeType: "audio/opus",
-        /**
-         * Specifies the number of audio samples processed per second (48,000 samples per second for high-quality audio).
-         * Higher values generally allow better audio quality.
-         */
-        clockRate: 48000,
-        /** Specifies the number of audio channels (2 for stereo audio). */
-        channels: 2,
-        /**
-         * Optional: Specifies a preferred payload type number for the codec.
-         * Helps ensure consistency in payload type numbering across different sessions or applications.
-         */
-        preferredPayloadType: 96, // Example value
-        /**
-         * Optional: Specifies a list of RTCP feedback mechanisms supported by the codec.
-         * Helps optimize codec behavior in response to network conditions.
-         */
+        kind: 'video',
+        mimeType: 'video/VP8',
+        clockRate: 90000,
+        parameters: {
+            'x-google-start-bitrate': 1000
+        }
+    },
+    {
+        kind: 'video',
+        mimeType: 'video/VP9',
+        clockRate: 90000,
+        parameters: {
+            'profile-id': 2,
+            'x-google-start-bitrate': 1000
+        }
+    },
+    {
+        kind: 'video',
+        mimeType: 'video/H264',
+        clockRate: 90000,
+        parameters: {
+            'packetization-mode': 1,
+            'profile-level-id': '42e01f',
+            'level-asymmetry-allowed': 1,
+            'x-google-start-bitrate': 1000
+        },
         rtcpFeedback: [
             // Example values
             {type: "nack"},
             {type: "nack", parameter: "pli"},
         ],
-    },
-    {
-        /** Indicates this is a video codec configuration */
-        kind: "video",
-        /** Specifies the MIME type for the VP8 codec, commonly used for video compression. */
-        mimeType: "video/VP8",
-        /** Specifies the clock rate, or the number of timing ticks per second (commonly 90,000 for video). */
-        clockRate: 90000,
-        /**
-         * Optional: Specifies codec-specific parameters.
-         * In this case, sets the starting bitrate for the codec.
-         */
-        parameters: {
-            "x-google-start-bitrate": 1000,
-        },
-        preferredPayloadType: 97, // Example value
-        rtcpFeedback: [
-            // Example values
-            {type: "nack"},
-            {type: "ccm", parameter: "fir"},
-            {type: "goog-remb"},
-        ],
-    },
+    }
 ];
 
 /**
@@ -159,39 +139,9 @@ peers.on("connection", async (socket) => {
      * It's necessary for managing the flow of media data between producers and consumers.
      */
     let router: mediasoup.types.Router<mediasoup.types.AppData>;
-    let sessionId = uuid4();
-    let peer = new Peer(sessionId);
+    const sessionId = uuid4();
+    const peer = new Connection(sessionId);
     connections.set(sessionId, peer);
-    /**
-     * A mediasoup WebRTC transport for sending media.
-     * It's essential for establishing a channel for sending media to a peer.
-     */
-    let producerTransport:
-        | mediasoup.types.WebRtcTransport<mediasoup.types.AppData>
-        | undefined;
-
-    /**
-     * A mediasoup WebRTC transport for receiving media.
-     * It's essential for establishing a channel for receiving media from a peer.
-     */
-    let consumerTransport:
-        | mediasoup.types.WebRtcTransport<mediasoup.types.AppData>
-        | undefined;
-
-    /**
-     * A mediasoup producer; it represents an audio or video source being routed through the server.
-     * It's critical fpeer.addTransport(producerTransport);or managing the sending of media data to consumers.
-     */
-    let producer: mediasoup.types.Producer<mediasoup.types.AppData> | undefined;
-
-    /**
-     * A mediasoup consumer; it represents an audio or video sink being routed through the server.
-     * It's critical for managing the reception of media data from producers.
-     */
-    let consumer: mediasoup.types.Consumer<mediasoup.types.AppData> | undefined;
-
-    let ffmpeg: Ffmpeg | undefined;
-
 
     console.log(`Peer connected: ${socket.id}`);
     socket.emit("connection-success", {socketId: socket.id});
@@ -221,7 +171,7 @@ peers.on("connection", async (socket) => {
     socket.on("getRouterRtpCapabilities", (callback) => {
         const routerRtpCapabilities = router.rtpCapabilities;
         console.log("Sent router rtp capabilities");
-        callback({routerRtpCapabilities,  sessionId: peer.sessionId});
+        callback({routerRtpCapabilities, sessionId: peer.sessionId});
     });
 
     /**
@@ -232,13 +182,13 @@ peers.on("connection", async (socket) => {
      * @param {boolean} data.sender - Indicates whether the transport is for sending or receiving media.
      * @param {function} callback - A callback function to handle the result of the transport creation.
      */
-    socket.on("createTransport", async ({sender, sessionId}, callback) => {
-        if (sender) {
-            const peer = connections.get(sessionId);
-            peer.producerTransport = await createWebRtcTransport(callback);
-        } else {
-            consumerTransport = await createWebRtcTransport(callback);
-        }
+    /**
+     * A mediasoup WebRTC transport for sending media.
+     * It's essential for establishing a channel for sending media to a peer.
+     */
+    socket.on("createTransport", async ({sessionId}, callback) => {
+        const peer = connections.get(sessionId);
+        peer.producerTransport = await createWebRtcTransport(callback);
     });
 
     /**
@@ -258,23 +208,23 @@ peers.on("connection", async (socket) => {
      * This function sets up a producer for sending media to the peer.
      * A producer represents the source of a single media track (audio or video).
      */
+
     socket.on("transport-produce", async ({kind, rtpParameters, sessionId}, callback) => {
         const peer = connections.get(sessionId);
-        producer = await peer.producerTransport.produce({
+        peer.producer = await peer.producerTransport.produce({
             kind,
             rtpParameters,
         });
-        peer.producer = producer;
 
-        producer?.on("transportclose", () => {
+        peer.producer?.on("transportclose", () => {
             console.log("Producer transport closed");
-            producer?.close();
+            peer.producer?.close();
         });
 
-        callback({id: producer?.id});
+        callback({id: peer.producer?.id});
     });
 
-    const publishProducerRtpStream = async (peer: Peer) => {
+    const publishProducerRtpStream = async (peer: Connection) => {
         console.log('publishProducerRtpStream()');
 
         // Create the mediasoup RTP Transport used to send media to the GStreamer process
@@ -284,7 +234,7 @@ peers.on("connection", async (socket) => {
             comedia: false
         };
 
-        peer.rtpTransport = await router.createPlainTransport(rtpTransportConfig);
+        const rtpTransport = await router.createPlainTransport(rtpTransportConfig);
 
         // Set the receiver RTP ports
         const remoteRtpPort = await getPort();
@@ -296,7 +246,7 @@ peers.on("connection", async (socket) => {
 
 
         // Connect the mediasoup RTP transport to the ports used by GStreamer
-        await peer.rtpTransport.connect({
+        await rtpTransport.connect({
             ip: '127.0.0.1',
             port: remoteRtpPort,
             rtcpPort: remoteRtcpPort
@@ -305,12 +255,8 @@ peers.on("connection", async (socket) => {
         const codecs = [];
         // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
         const routerCodec = router.rtpCapabilities.codecs?.find(
-            codec => codec.kind === producer!.kind
+            codec => codec.kind === peer.producer!.kind
         )!;
-
-        // if (routerCodec === undefined) {
-        //   throw new TypeError('No compatible codec!');
-        // }
 
         codecs.push(routerCodec);
 
@@ -321,7 +267,7 @@ peers.on("connection", async (socket) => {
 
         // Start the consumer paused
         // Once the gstreamer process is ready to consume resume and send a keyframe
-        peer.consumer = await peer.rtpTransport.consume({
+        peer.consumer = await rtpTransport.consume({
             producerId: peer.producer.id,
             rtpCapabilities,
             paused: true
@@ -330,7 +276,7 @@ peers.on("connection", async (socket) => {
         return {
             remoteRtpPort,
             remoteRtcpPort,
-            localRtcpPort: peer.rtpTransport.rtcpTuple ? peer.rtpTransport.rtcpTuple.localPort : undefined,
+            localRtcpPort: rtpTransport.rtcpTuple ? rtpTransport.rtcpTuple.localPort : undefined,
             rtpCapabilities,
             rtpParameters: peer.consumer.rtpParameters
         };
@@ -362,90 +308,6 @@ peers.on("connection", async (socket) => {
         const result = await peer.process.getResult();
         console.log("got result", result);
         callback(result);
-    });
-
-    /**
-     * Event handler for connecting the receiving transport.
-     * This step is required before the transport can be used to receive media.
-     */
-    socket.on("connectConsumerTransport", async ({dtlsParameters}) => {
-        await consumerTransport?.connect({dtlsParameters});
-    });
-
-    /**
-     * Event handler for consuming media.
-     * This function sets up a consumer for receiving media from the peer.
-     * A consumer represents the endpoint for receiving media of a single kind
-     * (audio or video) from a remote peer. Creating a consumer involves multiple
-     * steps to ensure that the media can be received and decoded correctly.
-     *
-     * @event
-     * @param {object} rtpCapabilities - The RTP capabilities of the consuming endpoint.
-     * @param {function} callback - A callback function to handle the result of the consume operation.
-     */
-    socket.on("consumeMedia", async ({rtpCapabilities}, callback) => {
-        try {
-            // Ensure there's a producer to consume from
-            if (producer) {
-                // Check if the router can consume the media from the producer based on the RTP capabilities
-                if (!router.canConsume({producerId: producer?.id, rtpCapabilities})) {
-                    console.error("Cannot consume");
-                    return;
-                }
-                console.log("-------> consume");
-
-                // Create a consumer on the consumer transport
-                consumer = await consumerTransport?.consume({
-                    producerId: producer?.id,
-                    rtpCapabilities,
-                    // Pause the consumer initially if it's a video consumer
-                    // This can help save bandwidth until the video is actually needed
-                    paused: producer?.kind === "video",
-                });
-
-                // Event handler for transport closure
-                // This helps ensure that resources are cleaned up when the transport is closed
-                consumer?.on("transportclose", () => {
-                    console.log("Consumer transport closed");
-                    consumer?.close();
-                });
-
-                // Event handler for producer closure
-                // This helps ensure that the consumer is closed when the producer is closed
-                consumer?.on("producerclose", () => {
-                    console.log("Producer closed");
-                    consumer?.close();
-                });
-
-                // Invoke the callback with the consumer parameters
-                // This allows the client to configure the consumer on its end
-                callback({
-                    params: {
-                        producerId: producer?.id,
-                        id: consumer?.id,
-                        kind: consumer?.kind,
-                        rtpParameters: consumer?.rtpParameters,
-                    },
-                });
-            }
-        } catch (error) {
-            // Handle any errors that occur during the consume process
-            console.error("Error consuming:", error);
-            callback({
-                params: {
-                    error,
-                },
-            });
-        }
-    });
-
-    /**
-     * Event handler for resuming media consumption.
-     * This function resumes media reception if it was previously paused.
-     */
-    socket.on("resumePausedConsumer", async () => {
-        console.log("consume-resume");
-        await consumer?.resume();
     });
 
     /**

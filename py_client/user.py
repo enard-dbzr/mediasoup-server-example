@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import Event
+from concurrent.futures import ProcessPoolExecutor
 from typing import Optional
 from datetime import datetime
 
@@ -81,7 +82,7 @@ class User:
         return device
 
     async def create_send_transport(self):
-        params = await self.sio.call("createTransport", {"sender": True, "sessionId": self.session_id})
+        params = await self.sio.call("createTransport", {"sessionId": self.session_id})
 
         transport = self.device.createSendTransport(**params["params"], sctpParameters=None)
 
@@ -128,8 +129,13 @@ async def task(path):
 
 
 async def main():
+    # WORKERS = 3
+    # executor = ProcessPoolExecutor(max_workers=WORKERS)
+    # for _ in range(WORKERS):
+    #     asyncio.get_running_loop().run_in_executor(executor, task, "video/test.webm")
     await asyncio.gather(task("video/test.webm"), task("video/test.webm"))
 
 
 if __name__ == '__main__':
     asyncio.run(main())
+
