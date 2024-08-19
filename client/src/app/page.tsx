@@ -115,7 +115,7 @@ export default function Home() {
 
       await newDevice.load({ routerRtpCapabilities: rtpCapabilities });
 
-      setDevice(newDevice);mediasoup
+      setDevice(newDevice);
     } catch (error: any) {
       console.log(error);
       if (error.name === "UnsupportedError") {

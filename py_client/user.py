@@ -128,7 +128,7 @@ async def task(path):
 
 
 async def main():
-    await asyncio.gather(task("video/test.webm"), task("video/video.webm"))
+    await asyncio.gather(task("video/test.webm"), task("video/test.webm"))
 
 
 if __name__ == '__main__':
