@@ -14,10 +14,14 @@ import cors from "cors";
 import mediasoup from "mediasoup";
 import {Ffmpeg} from "./ffmpeg.js";
 import {getPort} from "./port.js";
+import {v4 as uuid4} from "uuid";
+import {Peer} from "./peer.js";
+
 
 const app = express();
 const port = 4000;
 const server = http.createServer(app);
+const connections = new Map()
 
 app.use(
     cors({
@@ -155,7 +159,9 @@ peers.on("connection", async (socket) => {
      * It's necessary for managing the flow of media data between producers and consumers.
      */
     let router: mediasoup.types.Router<mediasoup.types.AppData>;
-
+    let sessionId = uuid4();
+    let peer = new Peer(sessionId);
+    connections.set(sessionId, peer);
     /**
      * A mediasoup WebRTC transport for sending media.
      * It's essential for establishing a channel for sending media to a peer.
@@ -174,7 +180,7 @@ peers.on("connection", async (socket) => {
 
     /**
      * A mediasoup producer; it represents an audio or video source being routed through the server.
-     * It's critical for managing the sending of media data to consumers.
+     * It's critical fpeer.addTransport(producerTransport);or managing the sending of media data to consumers.
      */
     let producer: mediasoup.types.Producer<mediasoup.types.AppData> | undefined;
 
@@ -215,7 +221,7 @@ peers.on("connection", async (socket) => {
     socket.on("getRouterRtpCapabilities", (callback) => {
         const routerRtpCapabilities = router.rtpCapabilities;
         console.log("Sent router rtp capabilities");
-        callback({routerRtpCapabilities});
+        callback({routerRtpCapabilities,  sessionId: peer.sessionId});
     });
 
     /**
@@ -226,9 +232,10 @@ peers.on("connection", async (socket) => {
      * @param {boolean} data.sender - Indicates whether the transport is for sending or receiving media.
      * @param {function} callback - A callback function to handle the result of the transport creation.
      */
-    socket.on("createTransport", async ({sender}, callback) => {
+    socket.on("createTransport", async ({sender, sessionId}, callback) => {
         if (sender) {
-            producerTransport = await createWebRtcTransport(callback);
+            const peer = connections.get(sessionId);
+            peer.producerTransport = await createWebRtcTransport(callback);
         } else {
             consumerTransport = await createWebRtcTransport(callback);
         }
@@ -240,8 +247,10 @@ peers.on("connection", async (socket) => {
      * @param {object} data.dtlsParameters - Datagram Transport Layer Security (DTLS) parameters.
      * These parameters are necessary for securing the transport with encryption.
      */
-    socket.on("connectProducerTransport", async ({dtlsParameters}) => {
-        await producerTransport?.connect({dtlsParameters});
+    socket.on("connectProducerTransport", async ({dtlsParameters, sessionId, transportId}) => {
+        const peer = connections.get(sessionId);
+        const transport = peer.producerTransport;
+        await transport.connect({dtlsParameters});
     });
 
     /**
@@ -249,11 +258,13 @@ peers.on("connection", async (socket) => {
      * This function sets up a producer for sending media to the peer.
      * A producer represents the source of a single media track (audio or video).
      */
-    socket.on("transport-produce", async ({kind, rtpParameters}, callback) => {
-        producer = await producerTransport?.produce({
+    socket.on("transport-produce", async ({kind, rtpParameters, sessionId}, callback) => {
+        const peer = connections.get(sessionId);
+        producer = await peer.producerTransport.produce({
             kind,
             rtpParameters,
         });
+        peer.producer = producer;
 
         producer?.on("transportclose", () => {
             console.log("Producer transport closed");
@@ -263,7 +274,7 @@ peers.on("connection", async (socket) => {
         callback({id: producer?.id});
     });
 
-    const publishProducerRtpStream = async () => {
+    const publishProducerRtpStream = async (peer: Peer) => {
         console.log('publishProducerRtpStream()');
 
         // Create the mediasoup RTP Transport used to send media to the GStreamer process
@@ -273,7 +284,7 @@ peers.on("connection", async (socket) => {
             comedia: false
         };
 
-        const rtpTransport = await router.createPlainTransport(rtpTransportConfig);
+        peer.rtpTransport = await router.createPlainTransport(rtpTransportConfig);
 
         // Set the receiver RTP ports
         const remoteRtpPort = await getPort();
@@ -285,7 +296,7 @@ peers.on("connection", async (socket) => {
 
 
         // Connect the mediasoup RTP transport to the ports used by GStreamer
-        await rtpTransport.connect({
+        await peer.rtpTransport.connect({
             ip: '127.0.0.1',
             port: remoteRtpPort,
             rtcpPort: remoteRtcpPort
@@ -310,44 +321,45 @@ peers.on("connection", async (socket) => {
 
         // Start the consumer paused
         // Once the gstreamer process is ready to consume resume and send a keyframe
-        const rtpConsumer = await rtpTransport.consume({
-            producerId: producer!.id,
+        peer.consumer = await peer.rtpTransport.consume({
+            producerId: peer.producer.id,
             rtpCapabilities,
             paused: true
         });
 
-        consumer = rtpConsumer;
-
         return {
             remoteRtpPort,
             remoteRtcpPort,
-            localRtcpPort: rtpTransport.rtcpTuple ? rtpTransport.rtcpTuple.localPort : undefined,
+            localRtcpPort: peer.rtpTransport.rtcpTuple ? peer.rtpTransport.rtcpTuple.localPort : undefined,
             rtpCapabilities,
-            rtpParameters: rtpConsumer.rtpParameters
+            rtpParameters: peer.consumer.rtpParameters
         };
     };
 
-    socket.on("start-record", async () => {
+    socket.on("start-record", async ({sessionId}) => {
+        console.log("session id", sessionId);
+        const peer = connections.get(sessionId);
         let recordInfo = {
-            video: await publishProducerRtpStream(),
+            video: await publishProducerRtpStream(peer),
             fileName: Date.now().toString()
         };
 
-        ffmpeg = new Ffmpeg(recordInfo, "2.7");
+        peer.process = new Ffmpeg(recordInfo, "2.7");
 
-        await ffmpeg.start();
+        await peer.process.start();
 
         setTimeout(async () => {
-            await consumer?.resume();
-            await consumer?.requestKeyFrame();
+            await peer.consumer?.resume();
+            await peer.consumer?.requestKeyFrame();
         }, 100);
     });
 
-    socket.on("stop-record", async (callback) => {
-        consumer?.close();
-        ffmpeg?.kill();
+    socket.on("stop-record", async ({sessionId}, callback) => {
+        const peer = connections.get(sessionId);
+        peer.consumer.close();
+        peer.process.kill();
         console.log("stopping");
-        const result = await ffmpeg?.getResult();
+        const result = await peer.process.getResult();
         console.log("got result", result);
         callback(result);
     });

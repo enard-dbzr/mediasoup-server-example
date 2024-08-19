@@ -1,7 +1,7 @@
-
 import asyncio
 from asyncio import Event
 from typing import Optional
+from datetime import datetime
 
 import socketio
 from aiortc.contrib.media import MediaPlayer
@@ -10,12 +10,16 @@ from pymediasoup.models.transport import DtlsParameters
 from pymediasoup.rtp_parameters import RtpCapabilities, RtpParameters
 from pymediasoup.transport import Transport
 
+from src.peer import Peer
+
 
 class User:
-    def __init__(self):
+    def __init__(self, file_name):
         self.sio = socketio.AsyncClient()
 
-        self.player = MediaPlayer("video/2.5-100-10000-audio.webm")
+        self.session_id = None
+
+        self.player = MediaPlayer(file_name)
         self.track = self.player.video
 
         self.connection_success_event = Event()
@@ -47,9 +51,9 @@ class User:
 
         result = await self.stop_record()
 
-        with open("first_image.jpg", "wb") as f:
+        with open(f'imgs/first_image{datetime.now()}.jpg', "wb") as f:
             f.write(result["firstImage"])
-        with open("last_image.jpg", "wb") as f:
+        with open(f'imgs/last_image{datetime.now()}.jpg', "wb") as f:
             f.write(result["lastImage"])
 
         await asyncio.sleep(2)
@@ -60,11 +64,13 @@ class User:
         @self.sio.on("connection-success")
         async def conn_handler(data):
             print("connection success", data)
+            # self.peer = Peer(data["sessionId"], self.device)
             self.connection_success_event.set()
 
     async def get_router_rtp_capabilities(self):
-        capabilities = await self.sio.call("getRouterRtpCapabilities")
-        result = RtpCapabilities(**capabilities["routerRtpCapabilities"])
+        message = await self.sio.call("getRouterRtpCapabilities")
+        self.session_id = message["sessionId"]
+        result = RtpCapabilities(**message["routerRtpCapabilities"])
         print("Got rtp capabilities:", result)
 
         return result
@@ -75,20 +81,22 @@ class User:
         return device
 
     async def create_send_transport(self):
-        params = await self.sio.call("createTransport", {"sender": True})
+        params = await self.sio.call("createTransport", {"sender": True, "sessionId": self.session_id})
 
         transport = self.device.createSendTransport(**params["params"], sctpParameters=None)
 
         @transport.on('connect')
         async def on_connect(dtls_parameters: DtlsParameters):
             print("connect producer transport with dtls:", dtls_parameters)
-            await self.sio.emit("connectProducerTransport", {"dtlsParameters": dtls_parameters.dict()})
+            await self.sio.emit("connectProducerTransport",
+                                {"dtlsParameters": dtls_parameters.dict(), "sessionId": self.session_id})
 
         @transport.on('produce')
         async def on_produce(kind: str, rtp_parameters: RtpParameters, loc):
             print("start producing", kind)
             res = await self.sio.call("transport-produce",
-                                      {"kind": kind, "rtpParameters": rtp_parameters.dict()})
+                                      {"kind": kind, "rtpParameters": rtp_parameters.dict(),
+                                       "sessionId": self.session_id}, )
             print("got producer:", res)
             return res["id"]
 
@@ -107,20 +115,21 @@ class User:
             print("transport close")
 
     async def start_record(self):
-        await self.sio.emit("start-record")
+        await self.sio.emit("start-record", {"sessionId": self.session_id})
 
     async def stop_record(self):
         print("stop record")
-        return await self.sio.call("stop-record")
+        return await self.sio.call("stop-record", {"sessionId": self.session_id})
 
 
-async def task():
-    user = User()
+async def task(path):
+    user = User(path)
     await user.async_task()
 
 
 async def main():
-    await asyncio.gather(task(), task())
+    await asyncio.gather(task("video/test.webm"), task("video/video.webm"))
+
 
 if __name__ == '__main__':
     asyncio.run(main())
