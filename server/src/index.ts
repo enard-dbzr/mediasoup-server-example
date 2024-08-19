@@ -17,6 +17,8 @@ import {getPort} from "./port.js";
 import {v4 as uuid4} from "uuid";
 import {Connection} from "./connection.js";
 
+const VIDEO_DURATION = process.env.VIDEO_DURATION || "2.7"
+
 
 const app = express();
 const port = 4000;
@@ -64,7 +66,7 @@ const createWorker = async (): Promise<
 > => {
     const newWorker = await mediasoup.createWorker({
         rtcMinPort: 2000, // Minimum port number for RTC traffic
-        rtcMaxPort: 2020, // Maximum port number for RTC traffic
+        rtcMaxPort: 2200, // Maximum port number for RTC traffic
     });
 
     console.log(`Worker process ID ${newWorker.pid}`);
@@ -290,7 +292,7 @@ peers.on("connection", async (socket) => {
             fileName: Date.now().toString()
         };
 
-        peer.process = new Ffmpeg(recordInfo, "2.7");
+        peer.process = new Ffmpeg(recordInfo, VIDEO_DURATION);
 
         await peer.process.start();
 
@@ -303,7 +305,7 @@ peers.on("connection", async (socket) => {
     socket.on("stop-record", async ({sessionId}, callback) => {
         const peer = connections.get(sessionId);
         peer.consumer.close();
-        peer.process.kill();
+        // peer.process.kill();
         console.log("stopping");
         const result = await peer.process.getResult();
         console.log("got result", result);

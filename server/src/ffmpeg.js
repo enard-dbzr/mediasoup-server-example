@@ -48,15 +48,24 @@ class FrameProcessor extends Transform {
     }
 
     async getResult() {
-        const firstImage = await sharp(this.firstFrame,
-            {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
-            .jpeg()
-            .toBuffer();
+        let firstImage;
+        if (this.firstFrame !== undefined) {
+            firstImage = await sharp(this.firstFrame,
+                {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
+                .jpeg()
+                .toBuffer();
 
-        const lastImage = await sharp(this.lastFrame,
-            {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
-            .jpeg()
-            .toBuffer();
+        } else {
+            console.log("NO FRAME");
+        }
+
+        let lastImage;
+        if (this.lastFrame !== undefined) {
+            lastImage = await sharp(this.lastFrame,
+                {raw: {width: this.fame_width, height: this.frame_height, channels: 3}})
+                .jpeg()
+                .toBuffer();
+        }
 
         const framesCount = this.framesCount;
 
@@ -74,6 +83,16 @@ export class Ffmpeg {
         this._sdpString = createSdpText(this._rtpParameters);
         this._sdpStream = convertStringToStream(this._sdpString);
 
+        this._frameProcessor = new FrameProcessor(640, 480);
+
+        // this._waitFrameProcessor = new Promise((resolve) => {
+        //     this._observer.once('frameProcessorStarted', resolve);
+        // });
+
+        this._waitFrameProcessor = new Promise((resolve) => {
+            this._frameProcessor.on('finish', resolve);
+        });
+
         this._waitEnd = new Promise((resolve) => {
             this._observer.once('processEnd', resolve);
         });
@@ -88,20 +107,23 @@ export class Ffmpeg {
         this._videoProcess.stderr.on('data', data => {
             console.log('ffmpeg::process::data [data:%o]', data);
 
-            if (this._frameProcessor === undefined) {
-                const frameSizeMatch = data.match(/Stream.*Video.* (\d{2,4})x(\d{2,4})/);
-                if (frameSizeMatch) {
-                    const width = parseInt(frameSizeMatch[1], 10);
-                    const height = parseInt(frameSizeMatch[2], 10);
-                    console.log(`Got stream frame size: ${width}x${height}`);
-
-                    this._frameProcessor = new FrameProcessor(width, height);
-
-                    this._videoProcess.stdout.pipe(this._frameProcessor);
-
-                }
-            }
+            // if (this._frameProcessor === undefined) {
+            //     const frameSizeMatch = data.match(/Stream.*Video.* (\d{2,4})x(\d{2,4})/);
+            //     if (frameSizeMatch) {
+            //         const width = parseInt(frameSizeMatch[1], 10);
+            //         const height = parseInt(frameSizeMatch[2], 10);
+            //         console.log(`Got stream frame size: ${width}x${height}`);
+            //
+            //         this._frameProcessor = new FrameProcessor(width, height);
+            //
+            //         this._videoProcess.stdout.pipe(this._frameProcessor);
+            //
+            //         this._observer.emit("frameProcessorStarted");
+            //     }
+            // }
         });
+
+        this._videoProcess.stdout.pipe(this._frameProcessor);
 
         this._videoProcess.on('close', (code) => {
             console.log(`Process closed with code ${code}`);
@@ -130,7 +152,9 @@ export class Ffmpeg {
     }
 
     async getResult() {
-        await this._waitEnd;
+        await this._waitFrameProcessor;
+        // await this._waitEnd;
+        console.log("RESULTT");
         return await this._frameProcessor.getResult();
     }
 
