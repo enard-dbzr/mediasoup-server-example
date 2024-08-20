@@ -142,6 +142,7 @@ peers.on("connection", async (socket) => {
     const sessionID = uuid4();
     const peer = new Connection(sessionID);
     connections.set(sessionID, peer);
+    console.log("session id", sessionID);
 
     console.log(`Peer connected: ${socket.id}`);
     socket.emit("connection-success", {socketId: socket.id});
@@ -187,7 +188,8 @@ peers.on("connection", async (socket) => {
      * It's essential for establishing a channel for sending media to a peer.
      */
     socket.on("createTransport", async ({sessionId}, callback) => {
-        const peer = connections.get(sessionID);
+        const peer = connections.get(sessionId);
+        console.log("aaa", sessionID);
         peer.producerTransport = await createWebRtcTransport(callback);
     });
 
@@ -199,7 +201,7 @@ peers.on("connection", async (socket) => {
      */
     socket.on("connectProducerTransport", async ({dtlsParameters, sessionId}) => {
         console.log("transport connected successfully", sessionId);
-        const peer = connections.get(sessionID);
+        const peer = connections.get(sessionId);
         const transport = peer.producerTransport;
         await transport.connect({dtlsParameters});
     });
@@ -211,7 +213,7 @@ peers.on("connection", async (socket) => {
      */
 
     socket.on("transport-produce", async ({kind, rtpParameters, sessionId}, callback) => {
-        const peer = connections.get(sessionID);
+        const peer = connections.get(sessionId);
         peer.producer = await peer.producerTransport.produce({
             kind,
             rtpParameters,
@@ -283,9 +285,11 @@ peers.on("connection", async (socket) => {
         };
     };
 
-    socket.on("start-record", async () => {
+    socket.on("start-record", async ({sessionId}) => {
         console.log("start-record");
-        const peer = connections.get(sessionID);
+        const peer = connections.get(sessionId);
+        console.log(peer);
+        console.log(connections);
         let recordInfo = {
             video: await publishProducerRtpStream(peer),
             fileName: Date.now().toString()
@@ -301,12 +305,14 @@ peers.on("connection", async (socket) => {
         }, 100);
     });
 
-    socket.on("stop-record", async (sessionId, callback) => {
-        const peer = connections.get(sessionID);
+    socket.on("stop-record", async ({sessionId}, callback) => {
+        const peer = connections.get(sessionId);
         peer.consumer.close();
         peer.process.kill();
         console.log("stopping");
         const result = await peer.process.getResult();
+        connections.delete(sessionId);
+
         console.log("got result", result);
         if (typeof callback == 'function') {
             callback(result);

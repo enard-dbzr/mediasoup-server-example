@@ -10,6 +10,7 @@ import {
     IceParameters,
     Transport,
 } from "mediasoup-client/lib/types";
+import {v4 as uuid4} from "uuid";
 
 
 export default function Home() {
@@ -19,7 +20,6 @@ export default function Home() {
      */
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-    let sessionId: undefined = undefined;
 
     /**
      * State to hold encoding parameters for the media stream.
@@ -51,8 +51,8 @@ export default function Home() {
     const [producerTransport, setProducerTransport] = useState<Transport | null>(
         null
     ); // Transport for sending media
-    const [consumerTransport, setConsumerTransport] = useState<any>(null); // Transport for receiving media
-
+    // let sessionId: string;
+    const [sessionId, setSessionId] = useState<string | null>(null);
     /**
      * Effect to initialize the socket connection on component mount.
      * The socket is used for signaling to coordinate media transmission.
@@ -96,7 +96,8 @@ export default function Home() {
      */
     const getRouterRtpCapabilities = async () => {
         socket.emit("getRouterRtpCapabilities", (data: any) => {
-            sessionId = data.sessionId;
+            setSessionId(data.sessionId);
+            console.log("session id", sessionId);
             setRtpCapabilities(data.routerRtpCapabilities);
             console.log(`getRouterRtpCapabilities: ${data.routerRtpCapabilities}`);
         });
@@ -134,9 +135,10 @@ export default function Home() {
      */
     const createSendTransport = async () => {
         // Request the server to create a send transport
+        console.log("sjshfhewufhuweqh", sessionId);
         socket.emit(
             "createTransport",
-            {sender: true},
+            {sessionId},
             ({
                  params,
              }: {
@@ -196,7 +198,7 @@ export default function Home() {
                         try {
                             console.log("----------> producer transport has connected");
                             // Notify the server that the transport is ready to connect with the provided DTLS parameters
-                            socket.emit("connectProducerTransport", {dtlsParameters});
+                            socket.emit("connectProducerTransport", {dtlsParameters, sessionId});
                             // Callback to indicate success
                             callback();
                         } catch (error) {
@@ -225,7 +227,7 @@ export default function Home() {
                             // Notify the server to start producing media with the provided parameters
                             socket.emit(
                                 "transport-produce",
-                                {kind, rtpParameters},
+                                {kind, rtpParameters, sessionId},
                                 ({id}: any) => {
                                     // Callback to provide the server-generated producer ID back to the transport
                                     callback({id});
@@ -265,7 +267,8 @@ export default function Home() {
 
 
     const startRecord = async () => {
-        socket.emit("start-record");
+        console.log("start record", sessionId);
+        socket.emit("start-record", {sessionId});
     }
 
     const stopRecord = async () => {
@@ -274,7 +277,6 @@ export default function Home() {
 
     const stopRecordButton = async () => {
         const result = await stopRecord();
-        console.log("res", result)
     }
 
     return (
