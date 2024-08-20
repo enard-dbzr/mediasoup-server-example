@@ -4,7 +4,6 @@ import {createSdpText} from "./sdp.js";
 import {convertStringToStream} from "./utils.js";
 import sharp from "sharp";
 import {Transform} from "stream";
-import * as fs from "node:fs";
 
 const RECORD_FILE_LOCATION_PATH = process.env.RECORD_FILE_LOCATION_PATH || './files';
 
@@ -119,14 +118,6 @@ export class Ffmpeg {
 
     kill() {
         console.log(this._videoProcess?.kill("SIGINT"));
-        // console.log('kill() [pid:%d]', this._videoProcess?.pid);
-        // console.log("stopping process")
-        // if (this._videoProcess) {
-        //     this._videoProcess.stderr.destroy();
-        //     this._videoProcess.stdout.destroy();
-        //
-        //     this._videoProcess.kill();
-        // }
     }
 
     async getResult() {

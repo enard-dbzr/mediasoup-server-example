@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
+import * as fs from "fs";
+import {format} from "date-fns";
 
 const poppins = Poppins({ weight: "400", subsets: ["latin"] });
 
@@ -19,3 +21,5 @@ export default function RootLayout({
     </html>
   );
 }
+
+

@@ -139,9 +139,9 @@ peers.on("connection", async (socket) => {
      * It's necessary for managing the flow of media data between producers and consumers.
      */
     let router: mediasoup.types.Router<mediasoup.types.AppData>;
-    const sessionId = uuid4();
-    const peer = new Connection(sessionId);
-    connections.set(sessionId, peer);
+    const sessionID = uuid4();
+    const peer = new Connection(sessionID);
+    connections.set(sessionID, peer);
 
     console.log(`Peer connected: ${socket.id}`);
     socket.emit("connection-success", {socketId: socket.id});
@@ -187,7 +187,7 @@ peers.on("connection", async (socket) => {
      * It's essential for establishing a channel for sending media to a peer.
      */
     socket.on("createTransport", async ({sessionId}, callback) => {
-        const peer = connections.get(sessionId);
+        const peer = connections.get(sessionID);
         peer.producerTransport = await createWebRtcTransport(callback);
     });
 
@@ -197,8 +197,9 @@ peers.on("connection", async (socket) => {
      * @param {object} data.dtlsParameters - Datagram Transport Layer Security (DTLS) parameters.
      * These parameters are necessary for securing the transport with encryption.
      */
-    socket.on("connectProducerTransport", async ({dtlsParameters, sessionId, transportId}) => {
-        const peer = connections.get(sessionId);
+    socket.on("connectProducerTransport", async ({dtlsParameters, sessionId}) => {
+        console.log("transport connected successfully", sessionId);
+        const peer = connections.get(sessionID);
         const transport = peer.producerTransport;
         await transport.connect({dtlsParameters});
     });
@@ -210,7 +211,7 @@ peers.on("connection", async (socket) => {
      */
 
     socket.on("transport-produce", async ({kind, rtpParameters, sessionId}, callback) => {
-        const peer = connections.get(sessionId);
+        const peer = connections.get(sessionID);
         peer.producer = await peer.producerTransport.produce({
             kind,
             rtpParameters,
@@ -225,7 +226,7 @@ peers.on("connection", async (socket) => {
     });
 
     const publishProducerRtpStream = async (peer: Connection) => {
-        console.log('publishProducerRtpStream()');
+        console.log('publishProducerRtpStream()', peer);
 
         // Create the mediasoup RTP Transport used to send media to the GStreamer process
         const rtpTransportConfig = {
@@ -255,7 +256,7 @@ peers.on("connection", async (socket) => {
         const codecs = [];
         // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
         const routerCodec = router.rtpCapabilities.codecs?.find(
-            codec => codec.kind === peer.producer!.kind
+            codec => codec.kind === peer.producer.kind
         )!;
 
         codecs.push(routerCodec);
@@ -282,9 +283,9 @@ peers.on("connection", async (socket) => {
         };
     };
 
-    socket.on("start-record", async ({sessionId}) => {
-        console.log("session id", sessionId);
-        const peer = connections.get(sessionId);
+    socket.on("start-record", async () => {
+        console.log("start-record");
+        const peer = connections.get(sessionID);
         let recordInfo = {
             video: await publishProducerRtpStream(peer),
             fileName: Date.now().toString()
@@ -300,14 +301,17 @@ peers.on("connection", async (socket) => {
         }, 100);
     });
 
-    socket.on("stop-record", async ({sessionId}, callback) => {
-        const peer = connections.get(sessionId);
+    socket.on("stop-record", async (sessionId, callback) => {
+        const peer = connections.get(sessionID);
         peer.consumer.close();
         peer.process.kill();
         console.log("stopping");
         const result = await peer.process.getResult();
         console.log("got result", result);
-        callback(result);
+        if (typeof callback == 'function') {
+            callback(result);
+
+        }
     });
 
     /**

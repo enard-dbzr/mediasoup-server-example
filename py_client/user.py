@@ -133,7 +133,7 @@ async def main():
     # executor = ProcessPoolExecutor(max_workers=WORKERS)
     # for _ in range(WORKERS):
     #     asyncio.get_running_loop().run_in_executor(executor, task, "video/test.webm")
-    await asyncio.gather(task("video/test.webm"), task("video/test.webm"))
+    await asyncio.gather(task("video/test.webm"), task("video/test.webm"), task("video/test.webm"))
 
 
 if __name__ == '__main__':
